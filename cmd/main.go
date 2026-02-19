@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/nats-io/nats.go"
 
 	"github.com/opusdvs/DonWeather-ms-telegram/internal/delivery"
 	"github.com/opusdvs/DonWeather-ms-telegram/internal/repository"
@@ -24,6 +26,11 @@ func main() {
 	if botToken == "" {
 		log.Fatal("TELEGRAM_BOT_TOKEN environment variable is required")
 	}
+	telegramBotApiBaseUrl := os.Getenv("TELEGRAM_BOT_API_BASE_URL")
+	if telegramBotApiBaseUrl == "" {
+		log.Fatal("TELEGRAM_BOT_API_BASE_URL environment variable is required")
+	}
+	telegramBotApiUrl := fmt.Sprintf("%s/bot%s", telegramBotApiBaseUrl, botToken)
 	webhookUrl := os.Getenv("WEBHOOK_URL")
 	if webhookUrl == "" {
 		log.Fatal("WEBHOOK_URL environment variable is required")
@@ -32,12 +39,28 @@ func main() {
 	if apiUrl == "" {
 		log.Fatal("API_URL environment variable is required")
 	}
+	natsHost := os.Getenv("NATS_HOST")
+	if natsHost == "" {
+		log.Fatal("NATS_HOST environment variable is required")
+	}
+	natsConn, err := nats.Connect(natsHost)
+	if err != nil {
+		log.Fatal(err)
+	}
 	messageRepository := repository.NewHTTPMessageRepository(apiUrl)
-	messageService := usecase.NewMessageService(messageRepository)
-	messageHandler := delivery.NewTelegramMessageHandler(*messageService, appCtx)
+	eventRepository := repository.NewEventConsumerRepository(natsConn)
+	sendMessageRepository := repository.NewSendMessageRepository(telegramBotApiUrl)
+	eventService := usecase.NewMessageService(messageRepository, eventRepository, sendMessageRepository)
+	eventDelivery := delivery.NewEventDelivery(*eventService)
+	go func() {
+		if err := eventDelivery.StartEventDelivery(appCtx); err != nil {
+			log.Printf("NATS event delivery stopped: %v", err)
+		}
+	}()
+	messageHandler := delivery.NewTelegramMessageHandler(*eventService, appCtx)
 
 	setWebhookRequest := delivery.NewSetWebhookRequest(botToken)
-	err := setWebhookRequest.SetWebhook(webhookUrl)
+	err = setWebhookRequest.SetWebhook(webhookUrl)
 	if err != nil {
 		log.Fatal(err)
 	}

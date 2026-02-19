@@ -24,6 +24,10 @@ func NewTelegramMessageHandler(messageService usecase.MessageService, appCtx con
 
 func (h *TelegramMessageHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 	var update domain.Update
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	fmt.Println("Webhook started")
 	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
 		log.Println("Error decoding request body:", err)
@@ -31,12 +35,26 @@ func (h *TelegramMessageHandler) Webhook(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	w.WriteHeader(http.StatusOK)
+
+	// Обработка callback_query (нажатие на inline-кнопку)
+	if update.CallbackQuery.ID != "" {
+		callbackQueryID := update.CallbackQuery.ID
+		callbackData := update.CallbackQuery.Data
+		chatID := update.CallbackQuery.Message.Chat.ID
+
+		if err := h.messageService.HandleCallbackQuery(h.appCtx, callbackQueryID, callbackData, chatID); err != nil {
+			log.Printf("Error handling callback query: %v", err)
+		}
+		return
+	}
+
+	// Обработка обычных сообщений
 	if update.Message == (domain.Message{}) {
 		log.Println("Message is required")
 		http.Error(w, "Message is required", http.StatusBadRequest)
 		return
 	}
-	w.WriteHeader(http.StatusOK)
 
 	if update.Message.Chat.ID == 0 {
 		log.Println("Chat ID is required")
@@ -44,26 +62,64 @@ func (h *TelegramMessageHandler) Webhook(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	telegramId := update.Message.Chat.ID
-
 	if update.Message.Text == "" {
 		log.Println("Message text is required")
 		http.Error(w, "Message text is required", http.StatusBadRequest)
 		return
 	}
-	token, err := parseToken(update.Message.Text)
-	if err != nil {
-		log.Println("Error parsing token:", err)
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	log.Println("Token:", token)
 
-	_, err = h.messageService.LinkTelegramIdToToken(h.appCtx, telegramId, token)
-	if err != nil {
-		log.Println("Error linking telegram ID to token:", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	// Обработка команд через switch case
+	switch update.Message.Text {
+	case "/start":
+		token, err := parseToken(update.Message.Text)
+		if err != nil {
+			log.Println("Error parsing token:", err)
+			text := h.messageService.ErrorParsingTokenMessage()
+			if err := h.messageService.SendMessage(h.appCtx, telegramId, text); err != nil {
+				log.Println("Error sending error parsing token message:", err)
+			}
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		log.Println("Token:", token)
+
+		_, err = h.messageService.LinkTelegramIdToToken(h.appCtx, telegramId, token)
+		if err != nil {
+			log.Println("Error linking telegram ID to token:", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			text := h.messageService.SubscriptionErrorMessage()
+			if err := h.messageService.SendMessage(h.appCtx, telegramId, text); err != nil {
+				log.Println("Error sending subscription error message:", err)
+			}
+			return
+		}
+
+		text := h.messageService.SubscriptionSuccessMessage()
+		if err := h.messageService.SendMessage(h.appCtx, telegramId, text); err != nil {
+			log.Println("Error sending subscription success message:", err)
+		}
+
+	case "/help":
+		text := h.messageService.HelpMessage()
+		if err := h.messageService.SendMessage(h.appCtx, telegramId, text); err != nil {
+			log.Println("Error sending help message:", err)
+		}
+
+	case "/menu":
+		text := h.messageService.MenuMessage()
+		if err := h.messageService.SendInlineKeyboardMessage(h.appCtx, telegramId, text); err != nil {
+			log.Println("Error sending menu message:", err)
+		}
+
+	default:
+		text := h.messageService.UnknownCommandMessage()
+		if err := h.messageService.SendMessage(h.appCtx, telegramId, text); err != nil {
+			log.Println("Error sending unknown command message:", err)
+		}
+		// Если команда не распознана, можно отправить сообщение или просто проигнорировать
+		log.Printf("Unknown command: %s", update.Message.Text)
 	}
+
 }
 
 func (h *TelegramMessageHandler) SetWebhook(w http.ResponseWriter, r *http.Request) {
