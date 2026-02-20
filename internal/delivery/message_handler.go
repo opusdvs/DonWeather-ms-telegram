@@ -68,8 +68,17 @@ func (h *TelegramMessageHandler) Webhook(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Обработка команд через switch case
-	switch update.Message.Text {
+	command, err := parseCommand(update.Message.Text)
+	if err != nil {
+		log.Println("Error parsing command:", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		text := h.messageService.UnknownCommandMessage()
+		if err := h.messageService.SendMessage(h.appCtx, telegramId, text); err != nil {
+			log.Println("Error sending unknown command message:", err)
+		}
+		return
+	}
+	switch command {
 	case "/start":
 		token, err := parseToken(update.Message.Text)
 		if err != nil {
@@ -140,6 +149,13 @@ func parseToken(message string) (string, error) {
 	return token, nil
 }
 
+func parseCommand(message string) (string, error) {
+	parts := strings.Split(message, " ")
+	if len(parts) != 2 {
+		return "", fmt.Errorf("invalid command format")
+	}
+	return parts[0], nil
+}
 func validateToken(token string) error {
 	match, err := regexp.MatchString("^[0-9a-f]{64}$", token)
 	if err != nil {

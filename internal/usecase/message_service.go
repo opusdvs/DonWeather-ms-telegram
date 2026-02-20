@@ -88,9 +88,6 @@ func (m *MessageService) BuildInlineKeyboard() map[string]any {
 	keyboard := map[string]any{
 		"inline_keyboard": [][]map[string]string{
 			{
-				{"text": "📋 Мои подписки", "callback_data": "my_subscriptions"},
-			},
-			{
 				{"text": "❌ Отменить все подписки", "callback_data": "cancel_all_subscriptions"},
 			},
 			{
@@ -114,10 +111,6 @@ func (m *MessageService) HandleCallbackQuery(ctx context.Context, callbackQueryI
 		return fmt.Errorf("failed to answer callback query: %w", err)
 	}
 	switch callbackData {
-	case "my_subscriptions":
-		text := "📋 Ваши подписки:\n\n" +
-			"Список подписок будет здесь..."
-		return m.SendMessage(ctx, chatID, text)
 	case "cancel_all_subscriptions":
 		text := "❌ Все подписки отменены."
 		return m.SendMessage(ctx, chatID, text)
@@ -137,9 +130,9 @@ func BuildMessageText(message domain.EventWeatherMessage) string {
 	text := fmt.Sprintf(header, message.Data.City)
 	switch message.Data.EventType {
 	case domain.EventTempDrop:
-		text += fmt.Sprintf("❄️ Температура упала на %.1f°C", message.Data.NewValue)
+		text += fmt.Sprintf("❄️ Температура упала с %.1f°C до %.1f°C", message.Data.OldValue, message.Data.NewValue)
 	case domain.EventTempRise:
-		text += fmt.Sprintf("🌡️ Температура поднялась на %.1f°C", message.Data.NewValue)
+		text += fmt.Sprintf("🌡️ Температура поднялась с %.1f°C до %.1f°C", message.Data.OldValue, message.Data.NewValue)
 	case domain.EventRainStarted:
 		text += "🌧️ Начался дождь"
 	case domain.EventRainStopped:
@@ -147,13 +140,13 @@ func BuildMessageText(message domain.EventWeatherMessage) string {
 	case domain.EventStrongWind:
 		text += "💨 Сильный ветер"
 	case domain.EventHumidityDrop:
-		text += fmt.Sprintf("💧 Влажность упала на %.1f%%", message.Data.NewValue)
+		text += fmt.Sprintf("💧 Влажность упала с %.1f%% до %.1f%%", message.Data.OldValue, message.Data.NewValue)
 	case domain.EventHumidityRise:
-		text += fmt.Sprintf("💧 Влажность поднялась на %.1f%%", message.Data.NewValue)
+		text += fmt.Sprintf("💧 Влажность поднялась с %.1f%% до %.1f%%", message.Data.OldValue, message.Data.NewValue)
 	case domain.EventPressureDrop:
-		text += fmt.Sprintf("📉 Давление упало на %.1f мм рт.ст.", message.Data.NewValue)
+		text += fmt.Sprintf("📉 Давление упало с %.1f мм рт.ст. до %.1f мм рт.ст.", message.Data.OldValue, message.Data.NewValue)
 	case domain.EventPressureRise:
-		text += fmt.Sprintf("📈 Давление поднялось на %.1f мм рт.ст.", message.Data.NewValue)
+		text += fmt.Sprintf("📈 Давление поднялось с %.1f мм рт.ст. до %.1f мм рт.ст.", message.Data.OldValue, message.Data.NewValue)
 	default:
 		text += "❓ Неизвестное"
 	}
